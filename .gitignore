@@ -29,7 +29,7 @@ Thumbs.db
 *.sublime-workspace
 
 # Optional: Mac system files
-*.DS_Store
+*.DS_Store  
 
 # Optional: npm package lock
 package-lock.json
