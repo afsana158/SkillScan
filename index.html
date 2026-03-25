@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SkillScan — Resume Analyzer</title>
+  <link rel="stylesheet" href="style.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="logo">Skill<span>Scan</span></div>
+  <div class="nav-tabs">
+    <div class="nav-tab active" onclick="showPage('analyze')">Analyze</div>
+    <div class="nav-tab" onclick="showPage('compare')">Compare JDs</div>
+  </div>
+</nav>
+
+<main>
+
+  <!-- ─── PAGE: ANALYZE ─── -->
+  <div class="page active" id="page-analyze">
+    <div class="hero">
+      <h1>Resume Intelligence</h1>
+      <p>Upload your resume and get an instant skill gap analysis powered by BERT</p>
+    </div>
+
+    <!-- MODE TABS -->
+    <div class="mode-tabs">
+      <div class="mode-tab active" onclick="setMode('role')">Match by Role</div>
+      <div class="mode-tab" onclick="setMode('jd')">Match by Job Description</div>
+    </div>
+
+    <!-- FORM -->
+    <div class="card">
+      <div class="form-grid">
+        <div>
+          <label>Upload Resume (PDF / DOCX / TXT)</label>
+          <div class="upload-area" id="uploadArea">
+            <input type="file" id="resumeFile" accept=".pdf,.docx,.txt"
+                   onchange="handleFile(this)" ondragover="event.preventDefault(); uploadArea.classList.add('drag')"
+                   ondragleave="uploadArea.classList.remove('drag')"/>
+            <div class="upload-icon">📄</div>
+            <div style="color:var(--muted);font-size:0.88rem">Drag & drop or click to browse</div>
+            <div class="upload-name" id="fileName" style="display:none"></div>
+          </div>
+        </div>
+
+        <!-- ROLE MODE -->
+        <div id="roleMode">
+          <label>Target Job Role</label>
+          <select id="jobRole">
+            <option value="frontend developer">Frontend Developer</option>
+            <option value="backend developer">Backend Developer</option>
+            <option value="full stack developer">Full Stack Developer</option>
+            <option value="ai engineer">AI Engineer</option>
+            <option value="data analyst">Data Analyst</option>
+            <option value="devops engineer">DevOps Engineer</option>
+          </select>
+        </div>
+
+        <!-- JD MODE -->
+        <div id="jdMode" style="display:none">
+          <label>Paste Job Description</label>
+          <textarea id="jdText" placeholder="Paste the full job description here..."></textarea>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" onclick="analyzeResume()" id="analyzeBtn">
+        <span>⚡</span> Analyze Resume
+      </button>
+    </div>
+
+    <!-- LOADER -->
+    <div class="loader-wrap" id="loader">
+      <div class="spinner"></div>
+      <p style="color:var(--muted)">Analyzing with BERT... hold tight</p>
+    </div>
+
+    <!-- RESULTS -->
+    <div class="results-wrap" id="results">
+
+      <!-- FIT SCORE -->
+      <div class="card">
+        <div class="score-section">
+          <div class="score-ring">
+            <svg viewBox="0 0 120 120" width="120" height="120">
+              <circle class="track" cx="60" cy="60" r="52"/>
+              <circle class="fill" id="scoreCircle" cx="60" cy="60" r="52"
+                      stroke-dasharray="326.7" stroke-dashoffset="326.7"/>
+            </svg>
+            <div class="score-num" id="scoreNum">0<small>%</small></div>
+          </div>
+          <div class="score-meta">
+            <h2 id="scoreTitle">Analyzing...</h2>
+            <p id="scoreFeedback"></p>
+            <div class="score-badge" id="scoreBadge"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SKILLS -->
+      <div class="two-col">
+        <div class="card">
+          <div class="card-title">✅ Matched Skills</div>
+          <div class="chip-grid" id="matchedChips"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">❌ Missing Skills</div>
+          <div class="chip-grid" id="missingChips"></div>
+        </div>
+      </div>
+
+      <!-- RESUME STRENGTH + RADAR -->
+      <div class="two-col">
+        <div class="card">
+          <div class="card-title">📊 Resume Strength</div>
+          <div class="strength-grid" id="strengthBars"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">🕸 Skill Radar</div>
+          <div class="chart-wrap"><canvas id="radarChart"></canvas></div>
+        </div>
+      </div>
+
+      <!-- LEARNING RESOURCES -->
+      <div class="card">
+        <div class="card-title">📚 Learning Resources for Missing Skills</div>
+        <div id="resourceList">
+          <div class="empty-state"><div class="icon">🎉</div><p>No missing skills!</p></div>
+        </div>
+      </div>
+
+      <!-- FUTURE ROLES -->
+      <div class="card">
+        <div class="card-title">🚀 Best Matching Roles for You</div>
+        <div id="roleList"></div>
+      </div>
+
+      <!-- PARSED SECTIONS -->
+      <div class="card">
+        <div class="card-title">🔍 Parsed Resume Sections</div>
+        <div id="parsedSections"></div>
+      </div>
+
+    </div><!-- /results -->
+  </div><!-- /page-analyze -->
+
+  <!-- ─── PAGE: COMPARE JDs ─── -->
+  <div class="page" id="page-compare">
+    <div class="hero">
+      <h1>Compare Job Descriptions</h1>
+      <p>Upload your resume and paste multiple JDs to find your best-fit role</p>
+    </div>
+
+    <div class="card">
+      <label>Upload Resume (PDF / DOCX / TXT)</label>
+      <div class="upload-area" id="uploadArea2" style="margin-bottom:20px">
+        <input type="file" id="resumeFile2" accept=".pdf,.docx,.txt" onchange="handleFile2(this)"/>
+        <div class="upload-icon">📄</div>
+        <div style="color:var(--muted);font-size:0.88rem">Drag & drop or click to browse</div>
+        <div class="upload-name" id="fileName2" style="display:none"></div>
+      </div>
+
+      <label>Job Descriptions</label>
+      <div id="jdEntries">
+        <div class="jd-entry">
+          <input type="text" placeholder="JD Title (e.g. ML Engineer @ Zepto)" class="jd-title"/>
+          <textarea style="flex:2;min-height:80px;resize:vertical;font-size:0.83rem" placeholder="Paste JD text here..." class="jd-body"></textarea>
+          <button class="btn-remove" onclick="removeJD(this)">×</button>
+        </div>
+        <div class="jd-entry">
+          <input type="text" placeholder="JD Title (e.g. Backend Dev @ Swiggy)" class="jd-title"/>
+          <textarea style="flex:2;min-height:80px;resize:vertical;font-size:0.83rem" placeholder="Paste JD text here..." class="jd-body"></textarea>
+          <button class="btn-remove" onclick="removeJD(this)">×</button>
+        </div>
+      </div>
+      <button class="btn-add" onclick="addJD()">+ Add Another JD</button>
+
+      <button class="btn btn-primary" onclick="compareJDs()" id="compareBtn">
+        <span>🔀</span> Compare All JDs
+      </button>
+    </div>
+
+    <div class="loader-wrap" id="compareLoader">
+      <div class="spinner"></div>
+      <p style="color:var(--muted)">Comparing JDs with BERT...</p>
+    </div>
+
+    <div class="results-wrap" id="compareResults">
+      <div class="card">
+        <div class="card-title">🏆 JD Rankings — Best Fit First</div>
+        <div id="rankingList"></div>
+      </div>
+    </div>
+  </div><!-- /page-compare -->
+
+</main>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+  const API = "http://127.0.0.1:8000";
+  let currentMode = "role";
+  let radarInstance = null;
+
+  // ─── Navigation ───
+  function showPage(id) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+    document.getElementById('page-' + id).classList.add('active');
+    event.target.classList.add('active');
+  }
+
+  function setMode(mode) {
+    currentMode = mode;
+    document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
+    event.target.classList.add('active');
+    document.getElementById('roleMode').style.display = mode === 'role' ? 'block' : 'none';
+    document.getElementById('jdMode').style.display = mode === 'jd' ? 'block' : 'none';
+  }
+
+  // ─── File Handlers ───
+  function handleFile(input) {
+    const name = input.files[0]?.name;
+    if (name) { document.getElementById('fileName').textContent = '📎 ' + name; document.getElementById('fileName').style.display = 'block'; }
+  }
+  function handleFile2(input) {
+    const name = input.files[0]?.name;
+    if (name) { document.getElementById('fileName2').textContent = '📎 ' + name; document.getElementById('fileName2').style.display = 'block'; }
+  }
+
+  // ─── Toast ───
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 3500);
+  }
+
+  // ─── Analyze ───
+  async function analyzeResume() {
+    const file = document.getElementById('resumeFile').files[0];
+    if (!file) return showToast('Please upload a resume file first');
+
+    document.getElementById('loader').style.display = 'block';
+    document.getElementById('results').style.display = 'none';
+    document.getElementById('analyzeBtn').disabled = true;
+
+    const form = new FormData();
+    form.append('file', file);
+
+    let url = API + '/review';
+    if (currentMode === 'jd') {
+      const jd = document.getElementById('jdText').value.trim();
+      if (!jd) { showToast('Please paste a Job Description'); document.getElementById('loader').style.display='none'; document.getElementById('analyzeBtn').disabled=false; return; }
+      form.append('jd_text', jd);
+      url = API + '/review-jd';
+    } else {
+      form.append('job_role', document.getElementById('jobRole').value);
+    }
+
+    try {
+      const res = await fetch(url, { method: 'POST', body: form });
+      if (!res.ok) throw new Error('API error: ' + res.status);
+      const data = await res.json();
+      renderResults(data);
+    } catch (e) {
+      showToast('Error: ' + e.message + '. Is the backend running?');
+    } finally {
+      document.getElementById('loader').style.display = 'none';
+      document.getElementById('analyzeBtn').disabled = false;
+    }
+  }
+
+  // ─── Render Results ───
+  function renderResults(data) {
+    document.getElementById('results').style.display = 'block';
+
+    // Score
+    const score = data.fit_score || 0;
+    animateScore(score);
+
+    // Feedback
+    document.getElementById('scoreFeedback').textContent = data.feedback || '';
+    const badge = document.getElementById('scoreBadge');
+    if (score >= 75) { badge.textContent = '🟢 Strong Match'; badge.style.cssText = 'background:rgba(104,211,145,0.15);color:#68d391;border:1px solid rgba(104,211,145,0.3)'; }
+    else if (score >= 50) { badge.textContent = '🟡 Moderate Match'; badge.style.cssText = 'background:rgba(246,173,85,0.15);color:#f6ad55;border:1px solid rgba(246,173,85,0.3)'; }
+    else { badge.textContent = '🔴 Weak Match'; badge.style.cssText = 'background:rgba(245,101,101,0.15);color:#f56565;border:1px solid rgba(245,101,101,0.3)'; }
+
+    // Chips
+    renderChips('matchedChips', data.skills_matched || [], 'chip-matched');
+    renderChips('missingChips', data.skills_missing || [], 'chip-missing');
+
+    // Strength
+    if (data.resume_strength) renderStrength(data.resume_strength);
+
+    // Radar
+    if (data.resume_strength) renderRadar(data.resume_strength);
+
+    // Resources
+    const rl = document.getElementById('resourceList');
+    rl.innerHTML = '';
+    const resources = data.learning_resources || [];
+    if (resources.length === 0) {
+      rl.innerHTML = '<div class="empty-state"><div class="icon">🎉</div><p>No missing skills — great match!</p></div>';
+    } else {
+      resources.forEach(r => {
+        rl.innerHTML += `<div class="resource-card">
+          <div><div class="skill-name">${r.skill}</div><div class="platform">${r.platform}</div></div>
+          <a class="resource-link" href="${r.url}" target="_blank">Learn →</a>
+        </div>`;
+      });
+    }
+
+    // Future Roles
+    const roleList = document.getElementById('roleList');
+    roleList.innerHTML = '';
+    const roles = data.future_role_suggestions || [];
+    roles.forEach((r, i) => {
+      const s = r.match_score || 0;
+      const color = s >= 70 ? 'var(--success)' : s >= 50 ? 'var(--warn)' : 'var(--danger)';
+      roleList.innerHTML += `<div class="role-item">
+        <div class="role-name">${r.role}</div>
+        <div class="role-score" style="color:${color}">${s}%</div>
+      </div>`;
+    });
+
+    // Parsed sections
+    renderParsed(data.analysis);
+
+    document.getElementById('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function animateScore(score) {
+    const circle = document.getElementById('scoreCircle');
+    const numEl = document.getElementById('scoreNum');
+    const titleEl = document.getElementById('scoreTitle');
+    const circumference = 326.7;
+    const color = score >= 75 ? '#68d391' : score >= 50 ? '#f6ad55' : '#f56565';
+    circle.style.stroke = color;
+
+    let current = 0;
+    const step = score / 60;
+    const timer = setInterval(() => {
+      current = Math.min(current + step, score);
+      const offset = circumference - (current / 100) * circumference;
+      circle.style.strokeDashoffset = offset;
+      numEl.innerHTML = Math.round(current) + '<small>%</small>';
+      if (current >= score) { clearInterval(timer); titleEl.textContent = score >= 75 ? 'Great Match!' : score >= 50 ? 'Decent Match' : 'Needs Work'; }
+    }, 16);
+  }
+
+  function renderChips(id, items, cls) {
+    const el = document.getElementById(id);
+    el.innerHTML = items.length === 0
+      ? '<span style="color:var(--muted);font-size:0.85rem">None found</span>'
+      : items.map(s => `<span class="chip ${cls}">${s}</span>`).join('');
+  }
+
+  function renderStrength(s) {
+    const bars = [
+      { label: 'Action Verbs', key: 'action_verb_score', color: '#7c6af7' },
+      { label: 'Quantification', key: 'quantification_score', color: '#4fd1c5' },
+      { label: 'Sections', key: 'section_completeness', color: '#68d391' },
+      { label: 'Skill Density', key: 'skill_density', color: '#f6ad55' },
+    ];
+    const el = document.getElementById('strengthBars');
+    el.innerHTML = bars.map(b => `
+      <div class="strength-item">
+        <label>${b.label} <span>${s[b.key] || 0}%</span></label>
+        <div class="bar-track"><div class="bar-fill" style="background:${b.color}" data-w="${s[b.key] || 0}"></div></div>
+      </div>`).join('');
+    setTimeout(() => {
+      document.querySelectorAll('.bar-fill').forEach(el => el.style.width = el.dataset.w + '%');
+    }, 100);
+  }
+
+  function renderRadar(s) {
+    if (radarInstance) radarInstance.destroy();
+    const ctx = document.getElementById('radarChart').getContext('2d');
+    radarInstance = new Chart(ctx, {
+      type: 'radar',
+      data: {
+        labels: ['Action Verbs', 'Quantification', 'Sections', 'Skill Density'],
+        datasets: [{
+          data: [s.action_verb_score, s.quantification_score, s.section_completeness, s.skill_density],
+          backgroundColor: 'rgba(124,106,247,0.2)',
+          borderColor: '#7c6af7',
+          pointBackgroundColor: '#7c6af7',
+          borderWidth: 2,
+        }]
+      },
+      options: {
+        scales: { r: { min: 0, max: 100, ticks: { display: false }, grid: { color: '#2a2c38' }, pointLabels: { color: '#7a7d8e', font: { size: 11 } } } },
+        plugins: { legend: { display: false } },
+      }
+    });
+  }
+
+  function renderParsed(analysis) {
+    if (!analysis) return;
+    const el = document.getElementById('parsedSections');
+    el.innerHTML = '';
+    if (analysis.education?.length) {
+      el.innerHTML += `<details><summary>🎓 Education (${analysis.education.length})</summary>
+        <div style="padding:10px 0">${analysis.education.map(e => `<div style="padding:6px 0;color:var(--muted);font-size:0.88rem">${e.line}</div>`).join('')}</div></details>`;
+    }
+    if (analysis.experience?.length) {
+      el.innerHTML += `<details><summary>💼 Experience (${analysis.experience.length})</summary>
+        <div style="padding:10px 0">${analysis.experience.map(e => `<div style="margin-bottom:8px"><div style="font-weight:600;font-size:0.9rem">${e.title}</div><div style="color:var(--muted);font-size:0.83rem">${e.description.slice(0,120)}...</div></div>`).join('')}</div></details>`;
+    }
+    if (analysis.projects?.length) {
+      el.innerHTML += `<details><summary>🛠 Projects (${analysis.projects.length})</summary>
+        <div style="padding:10px 0">${analysis.projects.map(p => `<div style="margin-bottom:8px"><div style="font-weight:600;font-size:0.9rem">${p.title}</div><div style="color:var(--muted);font-size:0.83rem">${p.description.slice(0,120)}...</div></div>`).join('')}</div></details>`;
+    }
+    if (analysis.certifications?.length) {
+      el.innerHTML += `<details><summary>🏅 Certifications (${analysis.certifications.length})</summary>
+        <div style="padding:10px 0">${analysis.certifications.map(c => `<div style="padding:4px 0;color:var(--muted);font-size:0.88rem">${c}</div>`).join('')}</div></details>`;
+    }
+  }
+
+  // ─── Compare JDs ───
+  function addJD() {
+    const entry = document.createElement('div');
+    entry.className = 'jd-entry';
+    entry.innerHTML = `
+      <input type="text" placeholder="JD Title" class="jd-title"/>
+      <textarea style="flex:2;min-height:80px;resize:vertical;font-size:0.83rem" placeholder="Paste JD text here..." class="jd-body"></textarea>
+      <button class="btn-remove" onclick="removeJD(this)">×</button>`;
+    document.getElementById('jdEntries').appendChild(entry);
+  }
+
+  function removeJD(btn) {
+    const entries = document.querySelectorAll('.jd-entry');
+    if (entries.length > 1) btn.parentElement.remove();
+    else showToast('Need at least one JD');
+  }
+
+  async function compareJDs() {
+    const file = document.getElementById('resumeFile2').files[0];
+    if (!file) return showToast('Please upload a resume first');
+
+    const entries = document.querySelectorAll('.jd-entry');
+    const jdList = [];
+    let valid = true;
+    entries.forEach(e => {
+      const title = e.querySelector('.jd-title').value.trim();
+      const text = e.querySelector('.jd-body').value.trim();
+      if (!title || !text) { valid = false; return; }
+      jdList.push({ title, text });
+    });
+    if (!valid || jdList.length === 0) return showToast('Please fill in all JD titles and texts');
+
+    document.getElementById('compareLoader').style.display = 'block';
+    document.getElementById('compareResults').style.display = 'none';
+    document.getElementById('compareBtn').disabled = true;
+
+    const form = new FormData();
+    form.append('file', file);
+    form.append('jd_list', JSON.stringify(jdList));
+
+    try {
+      const res = await fetch(API + '/compare-jds', { method: 'POST', body: form });
+      if (!res.ok) throw new Error('API error ' + res.status);
+      const data = await res.json();
+      renderCompare(data);
+    } catch (e) {
+      showToast('Error: ' + e.message);
+    } finally {
+      document.getElementById('compareLoader').style.display = 'none';
+      document.getElementById('compareBtn').disabled = false;
+    }
+  }
+
+  function renderCompare(data) {
+    document.getElementById('compareResults').style.display = 'block';
+    const el = document.getElementById('rankingList');
+    el.innerHTML = '';
+    const rankIcons = ['👑', '🥈', '🥉'];
+    const rankClasses = ['rank-1', 'rank-2', 'rank-3'];
+    data.rankings.forEach((r, i) => {
+      const score = r.fit_score;
+      const color = score >= 70 ? 'var(--success)' : score >= 50 ? 'var(--warn)' : 'var(--danger)';
+      el.innerHTML += `<div class="compare-row">
+        <div>
+          <div class="compare-title">${r.title}</div>
+          <div style="color:var(--muted);font-size:0.78rem;margin-top:4px">
+            ${r.top_missing_skills.length ? 'Missing: ' + r.top_missing_skills.slice(0,3).join(', ') : '✅ Great match!'}
+          </div>
+        </div>
+        <div class="rank-badge ${rankClasses[i] || ''}">${rankIcons[i] || i+1}</div>
+        <div style="font-family:var(--font-head);font-weight:800;font-size:1.1rem;color:${color}">${score}%</div>
+      </div>`;
+    });
+    document.getElementById('compareResults').scrollIntoView({ behavior: 'smooth' });
+  }
+</script>
+</body>
+</html>
