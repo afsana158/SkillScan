@@ -25,7 +25,6 @@ SkillScan is an AI-powered resume analysis tool that extracts skills from resume
 
 - HTML
 - CSS
-- JavaScript (if used)
 
 **Tools**
 
