@@ -57,7 +57,7 @@ Job Description:
         response = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
             headers={
-                "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
+                "Authorization": f"Bearer {os.getenv('OPEN_ROUTER_API_KEY')}",
                 "Content-Type": "application/json"
             },
             json={
