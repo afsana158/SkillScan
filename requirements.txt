@@ -6,7 +6,6 @@ sentence-transformers==2.6.1
 pymupdf==1.24.1
 python-docx==1.1.0
 requests==2.31.0
-torch==2.0.1
 python-multipart==0.0.9
 setuptools
 wheel
