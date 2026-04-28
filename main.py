@@ -5,8 +5,11 @@ import datetime
 import re
 import json
 import spacy
+import subprocess
+import os
 from pydantic import BaseModel
 import fitz
+import requests
 from docx import Document
 from sentence_transformers import SentenceTransformer, util
 
@@ -23,7 +26,9 @@ app.add_middleware(
 # ──────────────────────────────────────────────
 # Load models
 # ──────────────────────────────────────────────
+
 nlp = spacy.load("en_core_web_sm")
+
 bert_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 # ──────────────────────────────────────────────
@@ -221,6 +226,76 @@ def extract_education(section: str) -> List[Dict]:
 def extract_certifications(section: str) -> List[str]:
     return [l.strip() for l in section.splitlines() if l.strip() and len(l.strip()) > 3]
 
+def extract_name(text: str) -> str:
+    doc = nlp(text)
+    for ent in doc.ents:
+        if ent.label_ == "PERSON":
+            return ent.text
+    return "Unknown"
+
+def format_with_ai(data):
+    prompt = f"""
+You are an AI recruiter.
+
+Return ONLY valid JSON in this format:
+
+{{
+  "candidate_name": "",
+  "match_score": number,
+  "missing_skills": [],
+  "summary": ""
+}}
+
+Rules:
+- match_score must be from input fit_score
+- missing_skills must come from input
+- summary should be 1-2 lines
+
+Input Data:
+{json.dumps(data)}
+"""
+
+    try:
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",    
+            headers={
+                "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "mistralai/mistral-7b-instruct",
+                "messages": [
+                    {"role": "user", "content": prompt}
+                ]
+            },
+            timeout=10
+        )
+
+        res_json = response.json()
+
+        choices = res_json.get("choices", [])
+        if not choices:
+            raise ValueError("No response from AI")
+
+        content = choices[0]["message"]["content"]
+        
+
+        # Sometimes model returns extra text → clean it
+        start = content.find("{")
+        end = content.rfind("}") + 1
+        content = content[start:end]
+
+        return json.loads(content)
+
+    except Exception as e:
+        print("AI formatting failed:", e)
+
+        return {
+            "candidate_name": data.get("candidate_name", "Unknown"),
+            "match_score": data.get("fit_score", 0),
+            "missing_skills": data.get("skills_missing", []),
+            "summary": "Auto-generated fallback summary"
+        }
 
 # ──────────────────────────────────────────────
 # Scoring Functions
@@ -275,7 +350,7 @@ def compute_resume_strength(sections: Dict, text: str) -> Dict:
 
 
 def get_feedback(score: float) -> str:
-    if score >= 75:
+    if score >= 80:
         return "Strong resume match! Focus on quantifying your achievements more."
     elif score >= 50:
         return "Decent match. Add more role-specific skills and project outcomes."
@@ -334,6 +409,7 @@ async def review_resume(
 ):
     """Analyze resume against a predefined job role."""
     text = extract_text(file)
+    candidate_name = extract_name(text)
     job_role = job_role.lower().strip()
     sections = simple_section_split(text)
 
@@ -352,20 +428,16 @@ async def review_resume(
     expect_lower = {s.lower() for s in ROLE_SKILLS.get(job_role, [])}
     skills_matched = sorted(list(skills_lower & expect_lower))
     skills_missing = sorted(list(expect_lower - skills_lower))
-
-    return {
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-        "job_role": job_role,
-        "fit_score": score,
-        "skills_matched": skills_matched,
-        "skills_missing": skills_missing,
-        "skills_categorized": categorize_skills(parsed["skills"]),
-        "resume_strength": compute_resume_strength(sections, text),
-        "learning_resources": get_resources_for_missing(skills_missing),
-        "future_role_suggestions": predict_future_roles(parsed["skills"]),
-        "feedback": get_feedback(score),
-        "analysis": parsed,
+    data_for_ai = {
+    "candidate_name": candidate_name,
+    "fit_score": score,
+    "skills_missing": skills_missing,
+    "skills_matched": skills_matched,
+    "job_role": job_role
     }
+    final_output = format_with_ai(data_for_ai)
+
+    return final_output
 
 
 @app.post("/review-jd")
@@ -375,6 +447,7 @@ async def review_with_jd(
 ):
     """Analyze resume against a pasted Job Description (real JD, not predefined role)."""
     resume_text = extract_text(file)
+    candidate_name = extract_name(resume_text)
     sections = simple_section_split(resume_text)
 
     # BERT similarity against actual JD text
@@ -392,21 +465,18 @@ async def review_with_jd(
     # Skill comparison
     jd_skills = extract_known_skills_from_text(jd_text)
     resume_skills = extract_known_skills_from_text(resume_text)
-    matched = sorted(list(jd_skills & resume_skills))
-    missing = sorted(list(jd_skills - resume_skills))
-
-    return {
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-        "fit_score": score,
-        "jd_skill_count": len(jd_skills),
-        "resume_skill_count": len(resume_skills),
-        "skills_matched": matched,
-        "skills_missing": missing,
-        "skills_categorized": categorize_skills(list(resume_skills)),
-        "resume_strength": compute_resume_strength(sections, resume_text),
-        "learning_resources": get_resources_for_missing(missing[:10]),
-        "feedback": get_feedback(score),
+    skills_matched = sorted(list(jd_skills & resume_skills))
+    skills_missing = sorted(list(jd_skills - resume_skills))
+    data_for_ai = {
+    "candidate_name": candidate_name,
+    "fit_score": score,
+    "skills_missing": skills_missing,
+    "skills_matched": skills_matched,
+    # "job_role": job_role
     }
+    final_output = format_with_ai(data_for_ai)
+
+    return final_output
 
 
 @app.post("/compare-jds")
