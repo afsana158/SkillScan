@@ -61,7 +61,7 @@ Job Description:
                 "Content-Type": "application/json"
             },
             json={
-                "model": "mistralai/mistral-7b-instruct",
+                "model": "meta-llama/llama-3-8b-instruct",
                 "messages": [{"role": "user", "content": prompt}]
             },
             timeout=10
