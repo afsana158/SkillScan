@@ -66,6 +66,7 @@ Job Description:
             },
             timeout=10
         )
+        print("RAW RESPONSE:", response.text)
 
         res_json = response.json()
         content = res_json["choices"][0]["message"]["content"]
