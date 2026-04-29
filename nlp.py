@@ -533,6 +533,7 @@ async def get_supported_roles():
 
 # ──────────────────────────────────────────────
 # Pydantic Models
+
 # ──────────────────────────────────────────────
 class SkillRequest(BaseModel):
     skills: List[str]
