@@ -30,33 +30,68 @@ def extract_text(file: UploadFile) -> str:
 
     return ""
 
+# ── Keyword Extractor (Fallback) ──────────────────────────
+def extract_keywords(text: str) -> set:
+    text = text.lower()
+    text = re.sub(r"[^a-zA-Z0-9+#.\s]", " ", text)
+    words = set(text.split())
+    return {w for w in words if len(w) > 2}
+
+# ── ATS Fallback Scorer ───────────────────────────────────
+def ats_fallback(resume_text: str, jd_text: str) -> dict:
+    resume_words = extract_keywords(resume_text)
+    jd_words = extract_keywords(jd_text)
+
+    if not jd_words:
+        return {
+            "candidate_name": "Unknown",
+            "match_score": 0,
+            "missing_skills": [],
+            "summary": "Job description is empty or invalid."
+        }
+
+    matched = resume_words.intersection(jd_words)
+    missing = jd_words - resume_words
+
+    score = int((len(matched) / len(jd_words)) * 100)
+    missing_skills = list(missing)[:8]
+
+    return {
+        "candidate_name": "Unknown",
+        "match_score": score,
+        "missing_skills": missing_skills,
+        "summary": f"Fallback ATS scoring based on keyword overlap. Matched {len(matched)} out of {len(jd_words)} relevant terms."
+    }
+
 # ── JSON Extractor ────────────────────────────────────────
 def extract_json(text: str) -> dict:
     text = re.sub(r"```(?:json)?", "", text).strip()
     start = text.find("{")
     end = text.rfind("}") + 1
+
     if start == -1 or end == 0:
         print("EXTRACT_JSON FAILED — raw content:", text[:300])
-        raise ValueError("No JSON object found in response")
+        raise ValueError("No JSON object found")
+
     return json.loads(text[start:end])
 
-# ── AI Call ───────────────────────────────────────────────
+# ── AI Analyzer ───────────────────────────────────────────
 def analyze_with_ai(resume_text: str, jd_text: str) -> dict:
     prompt = f"""You are a strict ATS (Applicant Tracking System).
 
-Analyze the resume against the job description. Return ONLY a JSON object, no explanation, no markdown.
+Analyze the resume against the job description. Return ONLY a JSON object.
 
 Rules:
-- match_score: integer 0-100. Never a decimal like 0.85, always like 85.
-- missing_skills: specific technical skills from the JD not found in the resume. Max 8 items, 1-3 words each.
-- candidate_name: extract from resume header. If not found, use "Unknown".
-- summary: 1-2 sentences explaining the score. Be specific.
+- match_score: integer 0-100 (no decimals)
+- missing_skills: max 8 items, 1-3 words each
+- candidate_name: extract from resume header or "Unknown"
+- summary: 1-2 sentences
 
-Return ONLY this JSON:
+Return JSON:
 {{
   "candidate_name": "string",
   "match_score": number,
-  "missing_skills": ["skill1", "skill2"],
+  "missing_skills": ["skill1"],
   "summary": "string"
 }}
 
@@ -86,11 +121,11 @@ JOB DESCRIPTION:
             print(f"MODEL: {model} | STATUS: {response.status_code}")
 
             if "error" in res_json:
-                print(f"Rate limited on {model}, trying next... Error: {res_json['error']}")
+                print(f"Rate limited on {model}: {res_json['error']}")
                 continue
 
             if not res_json.get("choices"):
-                print(f"No choices from {model}, trying next...")
+                print(f"No choices from {model}")
                 continue
 
             content = res_json["choices"][0]["message"]["content"]
@@ -101,19 +136,16 @@ JOB DESCRIPTION:
                 score *= 100
             result["match_score"] = int(round(score))
 
-            print(f"Success with model: {model}, score: {result['match_score']}")
+            print(f"Success with model: {model}")
             return result
 
         except Exception as e:
             print(f"Error with {model}: {e}")
             continue
 
-    return {
-        "candidate_name": "Unknown",
-        "match_score": 0,
-        "missing_skills": [],
-        "summary": "All models are currently rate-limited. Please try again in a few minutes."
-    }
+    # ── FALLBACK TRIGGER ───────────────────────────────
+    print("All AI models failed → using ATS fallback")
+    return ats_fallback(resume_text, jd_text)
 
 # ── Endpoint ──────────────────────────────────────────────
 @app.post("/review")
@@ -122,6 +154,15 @@ async def review_resume(
     jd_text: str = Form(...)
 ):
     resume_text = extract_text(file)
+
+    if not resume_text.strip():
+        return {
+            "candidate_name": "Unknown",
+            "match_score": 0,
+            "missing_skills": [],
+            "summary": "Could not extract text from the uploaded file."
+        }
+
     return analyze_with_ai(resume_text, jd_text)
 
 @app.get("/ping")
