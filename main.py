@@ -8,6 +8,13 @@ import re
 
 app = FastAPI(title="Resume Analyzer")
 
+FREE_MODELS = [
+    "google/gemma-3-27b-it:free",
+    "google/gemma-4-31b-it:free",
+    "mistralai/mistral-small-3.1:free",
+    "nvidia/llama-3.1-nemotron-70b-instruct:free",
+]
+
 # ── Extract Text ──────────────────────────────────────────
 def extract_text(file: UploadFile) -> str:
     if file.filename.endswith(".pdf"):
@@ -25,10 +32,11 @@ def extract_text(file: UploadFile) -> str:
 
 # ── JSON Extractor ────────────────────────────────────────
 def extract_json(text: str) -> dict:
-    text = re.sub(r"```(?:json)?", "", text).strip()  # strip markdown fences
+    text = re.sub(r"```(?:json)?", "", text).strip()
     start = text.find("{")
     end = text.rfind("}") + 1
     if start == -1 or end == 0:
+        print("EXTRACT_JSON FAILED — raw content:", text[:300])
         raise ValueError("No JSON object found in response")
     return json.loads(text[start:end])
 
@@ -58,43 +66,54 @@ RESUME:
 JOB DESCRIPTION:
 {jd_text[:1500]}"""
 
-    try:
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {os.getenv('OPEN_ROUTER_API_KEY')}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "meta-llama/llama-3.3-70b-instruct:free",
-                "temperature": 0,   # ✅ deterministic output
-                "messages": [{"role": "user", "content": prompt}]
-            },
-            timeout=45   # ✅ handles Render cold starts
-        )
+    for model in FREE_MODELS:
+        try:
+            response = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {os.getenv('OPEN_ROUTER_API_KEY')}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": model,
+                    "temperature": 0,
+                    "messages": [{"role": "user", "content": prompt}]
+                },
+                timeout=45
+            )
 
-        print("STATUS:", response.status_code)
-        print("RAW:", response.text[:500])
+            res_json = response.json()
+            print(f"MODEL: {model} | STATUS: {response.status_code}")
 
-        content = response.json()["choices"][0]["message"]["content"]
-        result = extract_json(content)
+            if "error" in res_json:
+                print(f"Rate limited on {model}, trying next... Error: {res_json['error']}")
+                continue
 
-        # Normalize score defensively
-        score = float(result.get("match_score", 0))
-        if 0 < score <= 1:
-            score = score * 100
-        result["match_score"] = int(round(score))
+            if not res_json.get("choices"):
+                print(f"No choices from {model}, trying next...")
+                continue
 
-        return result
+            content = res_json["choices"][0]["message"]["content"]
+            result = extract_json(content)
 
-    except Exception as e:
-        print("AI Error:", e)
-        return {
-            "candidate_name": "Unknown",
-            "match_score": 0,
-            "missing_skills": [],
-            "summary": f"Analysis failed: {str(e)}"
-        }
+            score = float(result.get("match_score", 0))
+            if 0 < score <= 1:
+                score *= 100
+            result["match_score"] = int(round(score))
+
+            print(f"Success with model: {model}, score: {result['match_score']}")
+            return result
+
+        except Exception as e:
+            print(f"Error with {model}: {e}")
+            continue
+
+    return {
+        "candidate_name": "Unknown",
+        "match_score": 0,
+        "missing_skills": [],
+        "summary": "All models are currently rate-limited. Please try again in a few minutes."
+    }
 
 # ── Endpoint ──────────────────────────────────────────────
 @app.post("/review")
@@ -104,3 +123,7 @@ async def review_resume(
 ):
     resume_text = extract_text(file)
     return analyze_with_ai(resume_text, jd_text)
+
+@app.get("/ping")
+def ping():
+    return {"status": "alive"}
